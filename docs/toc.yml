@@ -73,6 +73,8 @@
       href: guides/evolving-specs.md
     - name: Monorepos
       href: guides/monorepo.md
+    - name: Hosting on Bitbucket
+      href: guides/bitbucket-hosting.md
 
 # Community
 - name: Community
