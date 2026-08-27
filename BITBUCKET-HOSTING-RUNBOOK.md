@@ -1,5 +1,10 @@
 # Runbook: Hosting Spec Kit Artifacts on Bitbucket
 
+> **Temporary location.** This file lives at the repository root while we
+> decide its final home in the docs (e.g. `docs/guides/`, README section,
+> or the extension publishing guide). Update the cross-link in
+> `docs/reference/authentication.md` when moving it.
+
 This runbook walks through configuring a Bitbucket repository as a
 distribution source for Spec Kit **extensions**, **bundles**, and
 **presets** — including private repositories.
@@ -45,8 +50,8 @@ my-speckit-catalog/
 ```
 
 Authoring the artifacts themselves is out of scope here — see the
-[Extension Development Guide](https://github.com/github/spec-kit/blob/main/extensions/EXTENSION-DEVELOPMENT-GUIDE.md)
-and the [Bundles reference](../reference/bundles.md)
+[Extension Development Guide](extensions/EXTENSION-DEVELOPMENT-GUIDE.md)
+and the [Bundles reference](docs/reference/bundles.md)
 (`specify bundle init` / `specify bundle build`).
 
 ## Step 2 — Build and upload release archives
@@ -209,7 +214,7 @@ credentials).
 ## Private repositories
 
 Authentication is opt-in via `~/.specify/auth.json` — see the
-[Authentication reference](../reference/authentication.md). Two options:
+[Authentication reference](docs/reference/authentication.md). Two options:
 
 **Access token (recommended).** Create a repository, project, or
 workspace access token with the **Repositories: Read** scope

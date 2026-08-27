@@ -196,7 +196,8 @@ Create the token with the **Repositories: Read** scope on the repository
 
 For an end-to-end walkthrough (repository layout, uploading archives,
 catalog hosting, CI), see the
-[Bitbucket hosting runbook](../guides/bitbucket-hosting.md).
+[Bitbucket hosting runbook](../../BITBUCKET-HOSTING-RUNBOOK.md)
+(temporary location — final docs placement TBD).
 
 ## Multiple entries
 
