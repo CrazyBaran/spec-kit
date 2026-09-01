@@ -77,6 +77,14 @@ Updates a specific extension, or all installed extensions if no name is given.
 
 Bundled extensions (such as `agent-context` and `git`) have no download URL; their updates install from the copy shipped with the running spec-kit release. When the catalog advertises a newer version than your spec-kit release ships, the update is reported as requiring a spec-kit upgrade first.
 
+When an installed bundled extension's files differ from the copy shipped with your spec-kit release even though the versions match (content that shipped without a version bump), the check flags it as stale content and points to the refresh command:
+
+```bash
+specify extension add <name> --force
+```
+
+Extension config files (`*-config.yml`, `*-config.local.yml`) are preserved across updates and forced reinstalls, and user edits to them are never counted as stale content.
+
 ## Enable / Disable an Extension
 
 ```bash

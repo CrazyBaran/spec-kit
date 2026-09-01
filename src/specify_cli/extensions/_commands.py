@@ -15,11 +15,13 @@ import shutil
 import stat
 import tempfile
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from uuid import uuid4
 
 if TYPE_CHECKING:
     from packaging.version import Version
+
+    from . import ExtensionManager
 
 import typer
 import yaml
@@ -109,6 +111,53 @@ def _command_safe_id(raw_id: object, placeholder: str = "<extension-id>") -> str
     return placeholder
 
 
+def _bundled_content_is_stale(
+    ext_id: str,
+    metadata: dict[str, Any],
+    ext_info: dict[str, Any],
+    manager: ExtensionManager,
+    installed_version: Version,
+) -> bool:
+    """Report whether a bundled extension's installed content is stale.
+
+    A bundled extension whose catalog version equals the installed version
+    can still be out of date: its content may have changed upstream without
+    a version bump, and the semver comparison alone then reports "Up to
+    date" forever (#4345). Compare the content hash recorded at install
+    time (falling back to hashing the installed directory for registry
+    entries that predate content_hash) against the copy bundled with the
+    running spec-kit version. Only meaningful for bundled extensions with
+    no download URL — anything downloadable is served by the normal
+    version flow.
+
+    The comparison requires the local bundled copy to declare the same
+    version as the installed one: a hash difference against an older or
+    newer local copy is version skew, not unbumped content drift, and a
+    `--force` refresh recommendation against an older copy would downgrade
+    the installation.
+    """
+    from . import compute_extension_content_hash
+
+    if not ext_info.get("bundled") or ext_info.get("download_url"):
+        return False
+    bundled_path, bundled_version = _bundled_update_source(ext_id)
+    if bundled_path is None or bundled_version != installed_version:
+        return False
+    try:
+        bundled_hash = compute_extension_content_hash(bundled_path)
+        installed_hash = metadata.get("content_hash")
+        if not isinstance(installed_hash, str) or not installed_hash:
+            installed_dir = manager.extensions_dir / ext_id
+            if not installed_dir.is_dir():
+                return False
+            installed_hash = compute_extension_content_hash(installed_dir)
+    except OSError:
+        # Unreadable content must not break the update check; the version
+        # comparison already ran, so fall back to its verdict.
+        return False
+    return installed_hash != bundled_hash
+
+
 def _bundled_update_source(ext_id: str) -> tuple[Path, Version] | tuple[None, None]:
     """Locate the local bundled copy of *ext_id* and its parsed version.
 
@@ -150,7 +199,8 @@ def _archive_extension_directory(source_dir: Path) -> Path:
                     # Never follow symlinks: is_file() follows the target
                     # and ZipFile.write() reads its bytes, which would turn
                     # an out-of-tree target into a regular archive member
-                    # before the hardened extractor ever sees it.
+                    # before the hardened extractor ever sees it. Matches
+                    # the symlink rule in compute_extension_content_hash.
                     if path.is_symlink():
                         continue
                     if path.is_file():
@@ -1677,6 +1727,7 @@ def extension_update(
         console.print("🔄 Checking for updates...\n")
 
         updates_available = []
+        stale_content = []
         blocked_updates = []
 
         for ext_id in extensions_to_update:
@@ -1751,6 +1802,23 @@ def extension_update(
                         "bundled_dir": bundled_dir,
                     }
                 )
+            elif catalog_version == installed_version and _bundled_content_is_stale(
+                ext_id, metadata, ext_info, manager, installed_version
+            ):
+                # Bundled content changed without a version bump (#4345):
+                # the semver comparison alone would report "Up to date"
+                # while the installed copy keeps missing shipped fixes.
+                # Guarded to equal versions: an installed copy newer than
+                # the catalog (e.g. written by a newer CLI) must not be
+                # steered into a downgrading --force refresh.
+                stale_content.append(ext_id)
+                console.print(
+                    f"⚠  {safe_ext_id}: v{installed_version} matches the catalog, but the "
+                    f"installed files differ from the copy bundled with this spec-kit version"
+                )
+                console.print(
+                    f"   Refresh with: specify extension add {_command_safe_id(ext_id)} --force"
+                )
             else:
                 console.print(f"✓ {safe_ext_id}: Up to date (v{installed_version})")
 
@@ -1760,6 +1828,11 @@ def extension_update(
                     "\n[yellow]Update(s) exist but require a newer spec-kit "
                     "release — upgrade spec-kit, then rerun "
                     "'specify extension update'.[/yellow]"
+                )
+            elif stale_content:
+                console.print(
+                    "\n[yellow]No version updates available, but the extension(s) "
+                    "flagged above have stale content.[/yellow]"
                 )
             else:
                 console.print("\n[green]All extensions are up to date![/green]")

@@ -734,6 +734,57 @@ class ExtensionManifest:
         return f"sha256:{h.hexdigest()}"
 
 
+def compute_extension_content_hash(ext_dir: Path) -> str:
+    """Calculate a SHA256 hash over an extension directory's shipped files.
+
+    The registry's ``manifest_hash`` only covers ``extension.yml``, so
+    content changes shipped without a manifest edit are invisible to it
+    (#4345). This hash covers every regular file an install would copy:
+    it folds in the sorted POSIX-style relative path and raw bytes of each
+    file, excluding exactly what installs treat as user-owned or skip —
+    top-level ``*-config.yml`` / ``*-config.local.yml`` (the only config
+    paths the remove/backup/restore machinery preserves, see
+    ``_target_follows_preserved_convention``) and ``.extensionignore``
+    plus whatever it ignores. Nested config-suffixed files are hashed:
+    installs overwrite them, so their changes are real staleness. The
+    same function therefore yields comparable hashes for a bundled source
+    directory and an installation made from it.
+
+    Symlinks are never followed: an entry linking outside the extension
+    directory must not pull external bytes into the hash. Bundled
+    extensions ship none, so both sides of a comparison stay symmetric.
+
+    Raises OSError when the directory cannot be read.
+    """
+    ignore_fn = ExtensionManager._load_extensionignore(ext_dir)
+    h = hashlib.sha256()
+
+    def walk(directory: Path) -> None:
+        entries = sorted(directory.iterdir(), key=lambda p: p.name)
+        ignored = ignore_fn(str(directory), [e.name for e in entries]) if ignore_fn else set()
+        for entry in entries:
+            if entry.name in ignored or entry.name == ".extensionignore":
+                continue
+            if entry.is_symlink():
+                continue
+            if entry.is_dir():
+                walk(entry)
+            elif entry.is_file():
+                if entry.parent == ext_dir and (
+                    entry.name.endswith("-config.yml")
+                    or entry.name.endswith("-config.local.yml")
+                ):
+                    continue
+                data = entry.read_bytes()
+                h.update(entry.relative_to(ext_dir).as_posix().encode("utf-8"))
+                h.update(b"\x00")
+                h.update(len(data).to_bytes(8, "big"))
+                h.update(data)
+
+    walk(ext_dir)
+    return f"sha256:{h.hexdigest()}"
+
+
 class ExtensionRegistry:
     """Manages the registry of installed extensions."""
 
@@ -2611,19 +2662,25 @@ class ExtensionManager:
             elif backup_config_dir.exists():
                 backup_config_dir.unlink()
 
-        # Update registry
-        self.registry.add(
-            manifest.id,
-            {
-                "version": manifest.version,
-                "source": "local",
-                "manifest_hash": manifest.get_hash(),
-                "enabled": True,
-                "priority": priority,
-                "registered_commands": registered_commands,
-                "registered_skills": registered_skills,
-            },
-        )
+        # Update registry. content_hash records what was shipped at install
+        # time so `extension update` can detect content that changed without
+        # a version bump (#4345); a hash failure must not fail the install.
+        try:
+            content_hash = compute_extension_content_hash(source_dir)
+        except OSError:
+            content_hash = None
+        registry_entry = {
+            "version": manifest.version,
+            "source": "local",
+            "manifest_hash": manifest.get_hash(),
+            "enabled": True,
+            "priority": priority,
+            "registered_commands": registered_commands,
+            "registered_skills": registered_skills,
+        }
+        if content_hash is not None:
+            registry_entry["content_hash"] = content_hash
+        self.registry.add(manifest.id, registry_entry)
 
         # Post-commit cleanup: the registry now records this extension as
         # installed, so the rescue guard (`not self.registry.is_installed`)
