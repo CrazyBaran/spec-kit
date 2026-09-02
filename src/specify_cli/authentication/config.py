@@ -25,6 +25,9 @@ class AuthConfigEntry:
     auth: str
     token: str | None = None
     token_env: str | None = None
+    # Username half of a Basic credential (required for auth="basic",
+    # e.g. Bitbucket API tokens / app passwords)
+    username: str | None = None
     # Azure AD service-principal fields
     tenant_id: str | None = None
     client_id: str | None = None
@@ -174,13 +177,23 @@ def load_auth_config(
                 f"auth scheme {auth!r}; supported: {list(_prov.supported_auth_schemes)}"
             )
 
+        username = entry_raw.get("username")
+        if username is not None and (
+            not isinstance(username, str) or not username.strip()
+        ):
+            raise ValueError(f"providers[{i}]: 'username' must be a non-empty string")
+
         # Validate token source based on auth scheme
-        if auth in ("bearer", "basic-pat"):
-            if not token and not token_env:
-                raise ValueError(
-                    f"providers[{i}]: auth={auth!r} requires 'token' or 'token_env'"
-                )
-        elif auth == "azure-ad":
+        if auth in ("bearer", "basic-pat", "basic") and not token and not token_env:
+            raise ValueError(
+                f"providers[{i}]: auth={auth!r} requires 'token' or 'token_env'"
+            )
+        if auth == "basic" and not username:
+            raise ValueError(
+                f"providers[{i}]: auth='basic' requires 'username' "
+                "(e.g. the Atlassian account email for Bitbucket API tokens)"
+            )
+        if auth == "azure-ad":
             tenant_id = entry_raw.get("tenant_id")
             client_id = entry_raw.get("client_id")
             client_secret_env = entry_raw.get("client_secret_env")
@@ -207,6 +220,7 @@ def load_auth_config(
                 auth=auth,
                 token=token,
                 token_env=_norm(token_env),
+                username=_norm(username),
                 tenant_id=_norm(entry_raw.get("tenant_id")),
                 client_id=_norm(entry_raw.get("client_id")),
                 client_secret_env=_norm(entry_raw.get("client_secret_env")),
